@@ -1,0 +1,55 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+    
+    function isValidCertificate() {
+      let requiredFields = ['fullName', 'serialNumber', 'module', 'level', 'date', 'userId'];
+      let data = request.resource.data;
+      
+      return data.keys().hasAll(requiredFields) &&
+             data.fullName is string && data.fullName.size() > 0 &&
+             data.serialNumber is string && data.serialNumber.size() > 0 &&
+             data.module is string && data.module.size() > 0 &&
+             data.level is string && data.level.size() > 0 &&
+             data.date is string &&
+             data.userId == request.auth.uid;
+    }
+
+    match /certificates/{certificateId} {
+      // Allow public read access for validation queries
+      allow read: if request.query.limit <= 1 && 
+                 request.query.filters.size() == 1 && 
+                 request.query.filters[0].op == "==" && 
+                 request.query.filters[0].field == "serialNumber";
+      
+      // Allow authenticated users to read their own certificates
+      allow read: if isAuthenticated() && 
+                 resource.data.userId == request.auth.uid;
+      
+      // Allow authenticated and verified users to create certificates
+      allow create: if isAuthenticated() && 
+                   isEmailVerified() &&
+                   isValidCertificate();
+      
+      // Allow users to update their own certificates
+      allow update: if isAuthenticated() && 
+                   isEmailVerified() &&
+                   resource.data.userId == request.auth.uid &&
+                   isValidCertificate();
+      
+      // Allow users to delete their own certificates
+      allow delete: if isAuthenticated() && 
+                   isEmailVerified() &&
+                   resource.data.userId == request.auth.uid;
+    }
+  }
+}
